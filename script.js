@@ -1,24 +1,5 @@
-// Import the functions you need from the SDKs you need
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
-import { getAnalytics } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-analytics.js";
-import { getDatabase, ref, push, set, onValue, remove, update } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-database.js";
-
-// Your web app's Firebase configuration
-const firebaseConfig = {
-    apiKey: "AIzaSyAJEgiKke0dXtSWf4Nu3mUsO4iW6bTd1PY",
-    authDomain: "todo-backend-fa968.firebaseapp.com",
-    projectId: "todo-backend-fa968",
-    storageBucket: "todo-backend-fa968.firebasestorage.app",
-    messagingSenderId: "183129247872",
-    appId: "1:183129247872:web:95bee1812348a48e741665",
-    measurementId: "G-YDXJ15EQFZ",
-    databaseURL: "https://todo-backend-fa968-default-rtdb.firebaseio.com"
-};
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
-const database = getDatabase(app);
+// 백엔드 API 기본 URL
+const API_BASE_URL = 'http://localhost:5050';
 
 // 할일 데이터 저장소
 let todos = [];
@@ -32,95 +13,97 @@ const todoCount = document.getElementById('todoCount');
 const clearCompletedBtn = document.getElementById('clearCompleted');
 const filterBtns = document.querySelectorAll('.filter-btn');
 
-// Firebase Realtime Database에서 할일 불러오기
-function loadTodos() {
+// 백엔드에서 할일 목록 가져오기
+async function loadTodos() {
     try {
-        console.log('Firebase에서 할일 목록을 가져오는 중...');
-        const todosRef = ref(database, 'todos');
+        console.log('백엔드에서 할일 목록을 가져오는 중...');
+        const response = await fetch(`${API_BASE_URL}/todos`);
         
-        // 실시간 업데이트를 위한 리스너 설정
-        onValue(todosRef, (snapshot) => {
-            todos = [];
-            const data = snapshot.val();
-            
-            if (data) {
-                // 객체를 배열로 변환하고 createdAt 기준으로 정렬
-                Object.keys(data).forEach((key) => {
-                    todos.push({
-                        id: key,
-                        ...data[key]
-                    });
-                });
-                
-                // createdAt 기준 내림차순 정렬 (최신순)
-                todos.sort((a, b) => {
-                    const dateA = new Date(a.createdAt || 0);
-                    const dateB = new Date(b.createdAt || 0);
-                    return dateB - dateA;
-                });
-                
-                console.log(`Firebase에서 ${todos.length}개의 할일을 성공적으로 가져왔습니다.`, todos);
-            } else {
-                console.log('Firebase에 저장된 할일이 없습니다.');
-            }
-            
-            renderTodos();
-        }, (error) => {
-            console.error('할일을 불러오는 중 오류 발생:', error);
-            alert('할일을 불러오는 중 오류가 발생했습니다: ' + error.message);
-        });
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        todos = data || [];
+        
+        console.log(`백엔드에서 ${todos.length}개의 할일을 성공적으로 가져왔습니다.`, todos);
+        renderTodos();
     } catch (error) {
         console.error('할일을 불러오는 중 오류 발생:', error);
         alert('할일을 불러오는 중 오류가 발생했습니다: ' + error.message);
+        // 오류 발생 시 빈 배열로 설정
+        todos = [];
+        renderTodos();
     }
 }
 
-
 // 할일 추가
 async function addTodo() {
-    const text = todoInput.value.trim();
-    if (text === '') {
+    const title = todoInput.value.trim();
+    if (title === '') {
         alert('할일을 입력해주세요!');
         return;
     }
 
     try {
-        const newTodo = {
-            text: text,
-            completed: false,
-            createdAt: new Date().toISOString()
-        };
+        const response = await fetch(`${API_BASE_URL}/todos`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                title: title,
+                completed: false
+            })
+        });
 
-        // Firebase Realtime Database에 할일 추가
-        const todosRef = ref(database, 'todos');
-        const newTodoRef = push(todosRef);
-        await set(newTodoRef, newTodo);
-        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || '할일 추가 실패');
+        }
+
+        const newTodo = await response.json();
         todoInput.value = '';
-        console.log('할일이 Firebase 데이터베이스에 추가되었습니다:', newTodoRef.key);
+        console.log('할일이 백엔드에 추가되었습니다:', newTodo);
+        
+        // 목록 새로고침
+        await loadTodos();
     } catch (error) {
         console.error('할일 추가 중 오류 발생:', error);
-        alert('할일을 추가하는 중 오류가 발생했습니다.');
+        alert('할일을 추가하는 중 오류가 발생했습니다: ' + error.message);
     }
 }
 
 // 할일 삭제
 async function deleteTodo(id) {
     // 삭제 확인
-    const todo = todos.find(t => t.id === id);
+    const todo = todos.find(t => t._id === id || t.id === id);
     if (!todo) {
         console.error('삭제할 할일을 찾을 수 없습니다:', id);
         return;
     }
 
-    if (!confirm(`"${todo.text}" 할일을 삭제하시겠습니까?`)) {
+    if (!confirm(`"${todo.title}" 할일을 삭제하시겠습니까?`)) {
         return;
     }
 
     try {
-        const todoRef = ref(database, `todos/${id}`);
-        await remove(todoRef);
-        console.log('할일이 Firebase 데이터베이스에서 삭제되었습니다:', id, todo);
+        const response = await fetch(`${API_BASE_URL}/todos/${id}`, {
+            method: 'DELETE'
+        });
+
+        if (!response.ok) {
+            if (response.status === 404) {
+                throw new Error('할일을 찾을 수 없습니다.');
+            }
+            const errorData = await response.json();
+            throw new Error(errorData.error || '할일 삭제 실패');
+        }
+
+        console.log('할일이 백엔드에서 삭제되었습니다:', id, todo);
+        
+        // 목록 새로고침
+        await loadTodos();
     } catch (error) {
         console.error('할일 삭제 중 오류 발생:', error);
         alert('할일을 삭제하는 중 오류가 발생했습니다: ' + error.message);
@@ -130,23 +113,41 @@ async function deleteTodo(id) {
 // 할일 완료 상태 토글
 async function toggleTodo(id) {
     try {
-        const todo = todos.find(t => t.id === id);
+        const todo = todos.find(t => t._id === id || t.id === id);
         if (!todo) {
             console.error('상태를 변경할 할일을 찾을 수 없습니다:', id);
             return;
         }
 
         const newCompletedState = !todo.completed;
-        const todoRef = ref(database, `todos/${id}`);
-        await update(todoRef, {
-            completed: newCompletedState,
-            updatedAt: new Date().toISOString() // 업데이트 시간 추가
+        
+        const response = await fetch(`${API_BASE_URL}/todos/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                completed: newCompletedState
+            })
         });
-        console.log('할일 상태가 Firebase 데이터베이스에서 업데이트되었습니다:', {
+
+        if (!response.ok) {
+            if (response.status === 404) {
+                throw new Error('할일을 찾을 수 없습니다.');
+            }
+            const errorData = await response.json();
+            throw new Error(errorData.error || '할일 상태 변경 실패');
+        }
+
+        const updatedTodo = await response.json();
+        console.log('할일 상태가 백엔드에서 업데이트되었습니다:', {
             id: id,
-            text: todo.text,
+            title: todo.title,
             completed: newCompletedState
         });
+        
+        // 목록 새로고침
+        await loadTodos();
     } catch (error) {
         console.error('할일 상태 변경 중 오류 발생:', error);
         alert('할일 상태를 변경하는 중 오류가 발생했습니다: ' + error.message);
@@ -154,16 +155,16 @@ async function toggleTodo(id) {
 }
 
 // 할일 수정
-async function editTodo(id, newText) {
-    const trimmedText = newText.trim();
+async function editTodo(id, newTitle) {
+    const trimmedTitle = newTitle.trim();
     
-    if (trimmedText === '') {
+    if (trimmedTitle === '') {
         alert('할일 내용을 입력해주세요!');
         return false;
     }
 
     // 기존 할일 찾기
-    const todo = todos.find(t => t.id === id);
+    const todo = todos.find(t => t._id === id || t.id === id);
     if (!todo) {
         console.error('수정할 할일을 찾을 수 없습니다:', id);
         alert('수정할 할일을 찾을 수 없습니다.');
@@ -171,22 +172,39 @@ async function editTodo(id, newText) {
     }
 
     // 내용이 변경되지 않았으면 수정하지 않음
-    if (todo.text === trimmedText) {
+    if (todo.title === trimmedTitle) {
         console.log('할일 내용이 변경되지 않았습니다.');
         return true;
     }
     
     try {
-        const todoRef = ref(database, `todos/${id}`);
-        await update(todoRef, {
-            text: trimmedText,
-            updatedAt: new Date().toISOString() // 수정 시간 추가
+        const response = await fetch(`${API_BASE_URL}/todos/${id}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                title: trimmedTitle
+            })
         });
-        console.log('할일이 Firebase 데이터베이스에서 수정되었습니다:', {
+
+        if (!response.ok) {
+            if (response.status === 404) {
+                throw new Error('할일을 찾을 수 없습니다.');
+            }
+            const errorData = await response.json();
+            throw new Error(errorData.error || '할일 수정 실패');
+        }
+
+        const updatedTodo = await response.json();
+        console.log('할일이 백엔드에서 수정되었습니다:', {
             id: id,
-            oldText: todo.text,
-            newText: trimmedText
+            oldTitle: todo.title,
+            newTitle: trimmedTitle
         });
+        
+        // 목록 새로고침
+        await loadTodos();
         return true;
     } catch (error) {
         console.error('할일 수정 중 오류 발생:', error);
@@ -214,29 +232,33 @@ function renderTodos() {
     if (filteredTodos.length === 0) {
         todoList.innerHTML = '<li class="empty-state">할일이 없습니다. 새로운 할일을 추가해보세요! ✨</li>';
     } else {
-        todoList.innerHTML = filteredTodos.map(todo => `
-            <li class="todo-item ${todo.completed ? 'completed' : ''}" data-id="${todo.id}">
+        todoList.innerHTML = filteredTodos.map(todo => {
+            const todoId = todo._id || todo.id;
+            const todoTitle = escapeHtml(todo.title || '');
+            return `
+            <li class="todo-item ${todo.completed ? 'completed' : ''}" data-id="${todoId}">
                 <input 
                     type="checkbox" 
                     class="todo-checkbox" 
                     ${todo.completed ? 'checked' : ''}
-                    onchange="toggleTodo('${todo.id}')"
+                    onchange="toggleTodo('${todoId}')"
                 >
                 <input 
                     type="text" 
                     class="todo-text" 
-                    value="${escapeHtml(todo.text)}"
-                    data-id="${todo.id}"
+                    value="${todoTitle}"
+                    data-id="${todoId}"
                     readonly
-                    onblur="handleTodoEdit('${todo.id}', this)"
-                    onkeypress="handleTodoKeyPress(event, '${todo.id}', this)"
+                    onblur="handleTodoEdit('${todoId}', this)"
+                    onkeypress="handleTodoKeyPress(event, '${todoId}', this)"
                 >
                 <div class="todo-actions">
-                    <button class="edit-btn" onclick="startEdit('${todo.id}')">수정</button>
-                    <button class="delete-btn" onclick="deleteTodo('${todo.id}')">삭제</button>
+                    <button class="edit-btn" onclick="startEdit('${todoId}')">수정</button>
+                    <button class="delete-btn" onclick="deleteTodo('${todoId}')">삭제</button>
                 </div>
             </li>
-        `).join('');
+        `;
+        }).join('');
     }
 
     updateTodoCount();
@@ -252,6 +274,8 @@ function escapeHtml(text) {
 // 할일 수정 시작
 function startEdit(id) {
     const todoItem = document.querySelector(`.todo-item[data-id="${id}"]`);
+    if (!todoItem) return;
+    
     const todoText = todoItem.querySelector('.todo-text');
     
     todoText.readOnly = false;
@@ -262,31 +286,31 @@ function startEdit(id) {
 
 // 할일 수정 처리 (blur 이벤트)
 async function handleTodoEdit(id, input) {
-    const newText = input.value.trim();
-    const todo = todos.find(t => t.id === id);
+    const newTitle = input.value.trim();
+    const todo = todos.find(t => (t._id === id || t.id === id));
     
-    if (newText === '') {
+    if (newTitle === '') {
         // 빈 값이면 원래 값으로 복원
-        input.value = todo ? todo.text : '';
+        input.value = todo ? (todo.title || '') : '';
         input.readOnly = true;
         input.classList.remove('editing');
         return;
     }
 
     // 내용이 변경되었는지 확인
-    if (todo && todo.text === newText) {
+    if (todo && todo.title === newTitle) {
         // 변경사항이 없으면 수정하지 않음
         input.readOnly = true;
         input.classList.remove('editing');
         return;
     }
 
-    // Firebase에 수정 사항 저장
-    const success = await editTodo(id, newText);
+    // 백엔드에 수정 사항 저장
+    const success = await editTodo(id, newTitle);
     
     if (!success) {
         // 실패 시 원래 값으로 복원
-        input.value = todo ? todo.text : '';
+        input.value = todo ? (todo.title || '') : '';
     }
     
     input.readOnly = true;
@@ -336,14 +360,27 @@ async function clearCompleted() {
     if (confirm(`완료된 ${completedCount}개의 할일을 삭제하시겠습니까?`)) {
         try {
             const deletePromises = completedTodos.map(todo => {
-                const todoRef = ref(database, `todos/${todo.id}`);
-                return remove(todoRef);
+                const todoId = todo._id || todo.id;
+                return fetch(`${API_BASE_URL}/todos/${todoId}`, {
+                    method: 'DELETE'
+                });
             });
-            await Promise.all(deletePromises);
-            console.log('완료된 할일들이 Firebase 데이터베이스에서 삭제되었습니다.');
+            
+            const results = await Promise.all(deletePromises);
+            
+            // 실패한 요청 확인
+            const failed = results.filter(r => !r.ok);
+            if (failed.length > 0) {
+                throw new Error(`${failed.length}개의 할일 삭제에 실패했습니다.`);
+            }
+            
+            console.log('완료된 할일들이 백엔드에서 삭제되었습니다.');
+            
+            // 목록 새로고침
+            await loadTodos();
         } catch (error) {
             console.error('완료된 할일 삭제 중 오류 발생:', error);
-            alert('완료된 할일을 삭제하는 중 오류가 발생했습니다.');
+            alert('완료된 할일을 삭제하는 중 오류가 발생했습니다: ' + error.message);
         }
     }
 }
